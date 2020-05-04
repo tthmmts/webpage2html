@@ -1,6 +1,4 @@
-import argparse
 import base64
-import codecs
 import datetime
 import hashlib
 import os
@@ -138,7 +136,7 @@ def get(index, relpath=None, verbose=True, usecache=True,
                              'content-type': response.headers.get('content-type')}
         except Exception as ex:
             if verbose:
-                log(f'[ WARN ] ??? - {full_path} {ex}')
+                log(f'[ WARN ] ??? - {full_path}: {ex}')
             return '', None
     elif os.path.exists(index):
         if relpath:
@@ -152,9 +150,9 @@ def get(index, relpath=None, verbose=True, usecache=True,
                 if verbose:
                     log(f'[ LOCAL ] found - {full_path}')
                 return ret, None
-            except IOError as err:
+            except IOError as ex:
                 if verbose:
-                    msg = str(err)
+                    msg = str(ex)
                     log(f'[ WARN ] file not found - {full_path} {msg}')
                 return '', None
         else:
@@ -232,11 +230,13 @@ def get_contents_by_selenium(url: str = None,
                     html_text = driver.page_source
                     driver.save_screenshot(f'{download_dir}/image/{site_id}.png')
             except TimeoutException as ex:
-                log("[ ERROR ]TimeoutException")
+                log(f"[ERROR]\tTimeoutException: '{ex}'")
                 html_text = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
             else:
                 driver.quit()
-    except:
+    except Exception as ex:
+        log(f"[ERROR]\twebdriver Chrome: '{ex}'")
+        log(f"[WARN]\tGet web page by request without screenshot")
         return get(url)
 
     if usecache:
@@ -250,6 +250,9 @@ def data_to_base64(index, src, verbose=True):
     sp = urlparse(src).path.lower()
     if src.strip().startswith('data:'):
         return src
+    elif src.strip().startswith('javascript:'):
+        return src
+
     if sp.endswith('.png'):
         fmt = 'image/png'
     elif sp.endswith('.gif'):
@@ -257,7 +260,7 @@ def data_to_base64(index, src, verbose=True):
     elif sp.endswith('.ico'):
         fmt = 'image/x-icon'
     elif sp.endswith('.jpg') or sp.endswith('.jpeg'):
-        fmt = 'image/jpg'
+        fmt = 'image/jpeg'
     elif sp.endswith('.webp'):
         fmt = 'image/webp'
     elif sp.endswith('.svg'):
@@ -294,13 +297,17 @@ def data_to_base64(index, src, verbose=True):
         data, extra_data = get(index, src, verbose=verbose)
 
     if extra_data and extra_data.get('content-type'):
-        fmt = extra_data.get('content-type').replace(' ', '')
+        fmt = extra_data.get('content-type').strip().replace(' ', '')
 
+    if fmt == "image/jpg":
+        fmt = "image/jpeg"
     if data:
+        # log(f"{index}, {fmt}, {type(data)}")
         if isinstance(data, bytes):
-            return f'data:{fmt};base64,' + bytes.decode(base64.b64encode(data))
+            # return f'data:{fmt};base64,' + bytes.decode(base64.b64encode(data))
+            return f'data:{fmt};base64,{base64.b64encode(data).decode("utf-8")}'
         else:
-            return f'data:{fmt};base64,' + bytes.decode(base64.b64encode(str.encode(data)))
+            return f'data:{fmt};base64,{base64.b64encode(str.encode(data)).decode("utf-8")}'
     else:
         return absurl(index, src)
 
@@ -317,8 +324,8 @@ def handle_css_content(index, css, verbose=True):
         if mo:
             try:
                 css = css.decode(mo.group(1))
-            except:
-                log(f'[ WARN ] failed to convert css to encoding {mo.group(1)}')
+            except Exception as ex:
+                log(f'[WARN]\tfailed to convert css to encoding {mo.group(1)}: {ex}')
     # Watch out! how to handle urls which contain parentheses inside? Oh god, css does not support such kind of urls
     # I tested such url in css, and, unfortunately, the css rule is broken. LOL!
     # I have to say that, CSS is awesome!
@@ -330,7 +337,10 @@ def handle_css_content(index, css, verbose=True):
         #     # dont handle font data uri currently
         #     return 'url(' + src + ')'
         base64_str = data_to_base64(index, src, verbose=verbose)
-        return f'url({base64_str})'
+
+        # log(f'url("{base64_str}")'[:40])
+
+        return f'url("{base64_str}")'
 
     css = reg.sub(repl, css)
     return css
@@ -368,19 +378,21 @@ def generate(url,
     html_doc, _ = get_contents_by_selenium(url, flg_screen_shot=True)
 
     # now build the dom tree
-    soup = BeautifulSoup(html_doc, 'lxml')
+    # soup = BeautifulSoup(html_doc, 'lxml')
+    soup = BeautifulSoup(html_doc, 'html5lib')
     soup_title = soup.title.string if soup.title else ''
     log(f"[ INFO ] get {soup_title}")
 
     for link in soup('link'):
         if link.get('href'):
-            add_links(absurl(url, link['href']))
+            # add_links(absurl(url, link['href']))
             if 'mask-icon' in (link.get('rel') or []) or 'icon' in (link.get('rel') or []) or 'apple-touch-icon' in (
                     link.get('rel') or []) or 'apple-touch-icon-precomposed' in (link.get('rel') or []):
                 link['data-href'] = link['href']
                 link['href'] = data_to_base64(url, link['href'], verbose=verbose)
-            elif link.get('type') == 'text/css' or link['href'].lower().endswith('.css') or 'stylesheet' in (
-                    link.get('rel') or []):
+            elif link.get('type') == 'text/css' or \
+                    link['href'].lower().endswith('.css') or \
+                    'stylesheet' in (link.get('rel') or []):
                 new_type = 'text/css' if not link.get('type') else link['type']
                 css = soup.new_tag('style', type=new_type)
                 css['data-href'] = link['href']
@@ -427,9 +439,9 @@ def generate(url,
                 # http://en.wikipedia.org/wiki/CDATA
                 # code.string = '<![CDATA[\n' + js_str.replace(']]>', ']]]]><![CDATA[>') + '\n]]>'
                 code.string = js_str
-        except:
+        except Exception as ex:
             if verbose:
-                log(repr(js_str))
+                log(f"[ERROR]\t{repr(js_str)}: {ex}")
             raise
         js.replace_with(code)
 
@@ -501,11 +513,17 @@ def generate(url,
                 tag.string = handle_css_content(url, tag.string, verbose=verbose)
 
     if level > 1:
-        return soup.prettify(formatter='html')
+        return soup.prettify(formatter='html5')
 
     html_file_path = f"{download_dir}/html/{site_id}.html"
+
+    result = soup.prettify(formatter='html5').replace("url(data:image/jpg;base64,", "url(data:image/jpeg;base64,")
+    reg_data_scheme = re.compile(r'url\s*\((data:.+?)\)')
+    result = re.sub(r'url\s*\((data:.+?)\)', r'url("\1")', result)
+
     with open(html_file_path, 'w') as f:
-        f.write(soup.prettify(formatter='html'))
+        # f.write(str(soup))
+        f.write(result)
 
     save_links()
     save_url_id_list()
@@ -542,6 +560,7 @@ def save_url_id_list():
     text = f"{site_id}\t{base_url}\t{date}\n"
     with open(link_file_path, 'a') as f:
         f.write(text)
+
 
 #
 # def usage():
@@ -580,9 +599,10 @@ def save_url_id_list():
 def short_cut(url):
     generate(url)
 
+
 def main():
     fire.Fire(short_cut)
 
+
 if __name__ == "__main__":
     main()
-
