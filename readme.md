@@ -2,7 +2,7 @@
 
 ## Webpage2html: Save web page to a single html file
 
-Original [webpage2html] script is developed by zTrix.
+Original [webpage2html] script is developed by [zTrix].
 
 This is a simple script to save a web page to a single html file, screenshot image file, link url list,.
 No mhtml or pdf stuff, no xxx_files directory, just one single readable and editable html file.
@@ -57,7 +57,7 @@ Currently srcset is discarded.
 
 # Contributors
 
-1.  The original [webpage2html] script is developed by [https://github.com/zTrix](zTrix)
+1.  The original [webpage2html] script is developed by [zTrix]
 1.  lukin.a.i submitted a patch to fix not recognised css link (rel=stylesheet) issue
 1.  [Gruber](https://github.com/GlassGruber).
 1.  Java port of this project. https://github.com/cedricblondeau/webpage2html-java
@@ -68,3 +68,4 @@ Currently srcset is discarded.
 [webpage2html] use [SATA License](LICENSE.txt) (Star And Thank Author License), so you have to star this project before using. Read the [license](LICENSE.txt) carefully.
 
 [webpage2html]: https://github.com/zTrix/webpage2html
+[ztrix]: https://github.com/zTrix
