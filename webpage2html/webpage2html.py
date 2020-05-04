@@ -258,6 +258,8 @@ def data_to_base64(index, src, verbose=True):
         fmt = 'image/x-icon'
     elif sp.endswith('.jpg') or sp.endswith('.jpeg'):
         fmt = 'image/jpg'
+    elif sp.endswith('.webp'):
+        fmt = 'image/webp'
     elif sp.endswith('.svg'):
         fmt = 'image/svg+xml'
     elif sp.endswith('.ttf'):
