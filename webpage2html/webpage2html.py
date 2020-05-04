@@ -1,38 +1,84 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-from __future__ import print_function
-
 import argparse
 import base64
 import codecs
 import datetime
+import hashlib
 import os
 import re
 import sys
+import time
+from pathlib import Path
+from urllib.parse import urlparse, urlunsplit, urljoin, quote
 
+import chromedriver_binary
+import fire
 import requests
 from bs4 import BeautifulSoup
-from termcolor import colored
-
-if sys.version > '3':
-    from urllib.parse import urlparse, urlunsplit, urljoin, quote
-else:
-    from urlparse import urlparse, urlunsplit, urljoin
-    from urllib import quote
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 
 re_css_url = re.compile(r'(url\(.*?\))')
 webpage2html_cache = {}
 
 
-def log(s, color=None, on_color=None, attrs=None, new_line=True):
-    if not color:
-        print(str(s), end=' ', file=sys.stderr)
-    else:
-        print(colored(str(s), color, on_color, attrs), end=' ', file=sys.stderr)
+def log(s, new_line=True):
+    """
+    log を標準出力する
+    """
+    print(str(s), end=' ', file=sys.stderr)
     if new_line:
         sys.stderr.write('\n')
     sys.stderr.flush()
+
+
+def prepare_download() -> str:
+    """
+    ダウンロードのディレクトリの準備
+    """
+    download_dir_name = 'download'
+    download_dir_path = Path(download_dir_name)
+    download_dir_path.mkdir(parents=True, exist_ok=True)
+
+    download_dir_path_html = download_dir_path / "html"
+    download_dir_path_html.mkdir(parents=True, exist_ok=True)
+    download_dir_path_image = download_dir_path / "image"
+    download_dir_path_image.mkdir(parents=True, exist_ok=True)
+    download_dir_path_link = download_dir_path / "link"
+    download_dir_path_link.mkdir(parents=True, exist_ok=True)
+
+    download_dir_str = str(download_dir_path.resolve())
+    return download_dir_str
+
+
+def make_site_id(url: str = "") -> str:
+    """
+    ダウンロードのディレクトリの準備
+    """
+    result = hashlib.sha256(url.encode()).digest()
+    # log(type(result))
+    hash_str = base64.b32encode(result).decode("utf8")
+    return hash_str
+
+
+download_dir = prepare_download()
+site_id = ""
+external_links = []
+internal_links = []
+base_url = ""
+
+
+def add_links(url):
+    global external_links
+    global internal_links
+    global base_url
+    # log(f"{url} {base_url}")
+    if url.count("/") < 3:
+        return None
+    if url.lower().startswith('http'):
+        if url.split("/")[2] == base_url.split("/")[2]:
+            internal_links.append(url)
+        else:
+            external_links.append(url)
 
 
 def absurl(index, relpath=None, normpath=None):
@@ -41,8 +87,6 @@ def absurl(index, relpath=None, normpath=None):
     if index.lower().startswith('http') or (relpath and relpath.startswith('http')):
         new = urlparse(urljoin(index, relpath))
         return urlunsplit((new.scheme, new.netloc, normpath(new.path), new.query, ''))
-        # normpath不是函数，为什么这里一直用normpath(path)这种格式
-        # netloc contains basic auth, so do not use domain
     else:
         if relpath:
             return normpath(os.path.join(os.path.dirname(index), relpath))
@@ -50,13 +94,18 @@ def absurl(index, relpath=None, normpath=None):
             return index
 
 
-def get(index, relpath=None, verbose=True, usecache=True, verify=True, ignore_error=False, username=None, password=None):
+def get(index, relpath=None, verbose=True, usecache=True,
+        verify=True, ignore_error=False, username=None,
+        password=None):
     global webpage2html_cache
+    global site_id
+    global download_dir
+
     if index.startswith('http') or (relpath and relpath.startswith('http')):
         full_path = absurl(index, relpath)
         if not full_path:
             if verbose:
-                log('[ WARN ] invalid path, %s %s' % (index, relpath), 'yellow')
+                log(f'[ WARN ] invalid path, {index} {relpath}')
             return '', None
         # urllib2 only accepts valid url, the following code is taken from urllib
         # http://svn.python.org/view/python/trunk/Lib/urllib.py?r1=71780&r2=71779&pathrev=71780
@@ -64,16 +113,15 @@ def get(index, relpath=None, verbose=True, usecache=True, verify=True, ignore_er
         if usecache:
             if full_path in webpage2html_cache:
                 if verbose:
-                    log('[ CACHE HIT ] - %s' % full_path)
+                    log(f'[ CACHE HIT ] - {full_path}')
                 return webpage2html_cache[full_path], None
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:65.0) Gecko/20100101 Firefox/65.0'
         }
-
         auth = None
         if username and password:
             auth = requests.auth.HTTPBasicAuth(username, password)
-
         try:
             response = requests.get(full_path, headers=headers, verify=verify, auth=auth)
             if verbose:
@@ -86,10 +134,11 @@ def get(index, relpath=None, verbose=True, usecache=True, verify=True, ignore_er
                 content = response.content
             if usecache:
                 webpage2html_cache[response.url] = content
-            return content, {'url': response.url, 'content-type': response.headers.get('content-type')}
+            return content, {'url': response.url,
+                             'content-type': response.headers.get('content-type')}
         except Exception as ex:
             if verbose:
-                log('[ WARN ] %s - %s %s' % ('???', full_path, ex), 'yellow')
+                log(f'[ WARN ] ??? - {full_path} {ex}')
             return '', None
     elif os.path.exists(index):
         if relpath:
@@ -101,26 +150,99 @@ def get(index, relpath=None, verbose=True, usecache=True, verify=True, ignore_er
             try:
                 ret = open(full_path, 'rb').read()
                 if verbose:
-                    log('[ LOCAL ] found - %s' % full_path)
+                    log(f'[ LOCAL ] found - {full_path}')
                 return ret, None
             except IOError as err:
                 if verbose:
-                    log('[ WARN ] file not found - %s %s' % (full_path, str(err)), 'yellow')
+                    msg = str(err)
+                    log(f'[ WARN ] file not found - {full_path} {msg}')
                 return '', None
         else:
             try:
                 ret = open(index, 'rb').read()
                 if verbose:
-                    log('[ LOCAL ] found - %s' % index)
+                    log(f'[ LOCAL ] found - {index}')
                 return ret, None
             except IOError as err:
                 if verbose:
-                    log('[ WARN ] file not found - %s %s' % (index, str(err)), 'yellow')
+                    msg = str(err)
+                    log(f'[ WARN ] file not found - {index} {msg}')
                 return '', None
     else:
         if verbose:
-            log('[ ERROR ] invalid index - %s' % index, 'red')
+            log(f'[ ERROR ] invalid index - {index}')
         return '', None
+
+
+def get_contents_by_selenium(url: str = None,
+                             relpath=None,
+                             verbose=True,
+                             usecache=True,
+                             verify=True,
+                             ignore_error=False,
+                             username=None,
+                             password=None,
+                             flg_screen_shot: bool = False
+                             ) -> tuple:
+    """
+    Selenium を利用してHTMLファイルをダウンロードする．
+    """
+    global site_id
+    global download_dir
+    global webpage2html_cache
+
+    url = absurl(url, base_url)
+    full_path = quote(url, safe="%/:=&?~#+!$,;'@()*[]")
+    if usecache:
+        if full_path in webpage2html_cache:
+            if verbose:
+                log(f'[ CACHE HIT ] - {full_path}')
+            return webpage2html_cache[full_path], {'url': url, 'content-type': "text/html"}
+
+    if not url.startswith("http"):
+        if usecache:
+            contents = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
+            webpage2html_cache[full_path] = contents
+        return contents, {'url': url, 'content-type': "text/html"}
+
+    log(f"[ DEBUG ] - Get by selenium: {url} as {site_id}")
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument("--incognito")
+    options.add_argument("--hide-scrollbars")
+    options.add_argument("--test-type")
+
+    if not chromedriver_binary:
+        return get(url)
+    try:
+        with webdriver.Chrome(options=options) as driver:
+            try:
+                driver.get(url)
+                if flg_screen_shot:
+                    width = driver.execute_script("return document.body.scrollWidth;")
+                    driver.set_window_size(max(width, 1920), 1080)
+                    time.sleep(2)
+                    height = driver.execute_script("return document.body.scrollHeight;")
+                    driver.set_window_size(max(width, 1920), height)
+                    time.sleep(2)
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(12)
+                    driver.execute_script("window.scrollTo(0, 0)")
+                    time.sleep(2)
+                    html_text = driver.page_source
+                    driver.save_screenshot(f'{download_dir}/image/{site_id}.png')
+            except TimeoutException as ex:
+                log("[ ERROR ]TimeoutException")
+                html_text = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
+            else:
+                driver.quit()
+    except:
+        return get(url)
+
+    if usecache:
+        webpage2html_cache[full_path] = html_text
+
+    return html_text, {'url': url, 'content-type': "text/html"}
 
 
 def data_to_base64(index, src, verbose=True):
@@ -150,26 +272,33 @@ def data_to_base64(index, src, verbose=True):
         fmt = 'application/vnd.ms-fontobject'
     elif sp.endswith('.sfnt'):
         fmt = 'application/font-sfnt'
-    elif sp.endswith('.css') or sp.endswith('.less'):
+    elif sp.endswith('.css') or sp.endswith('.less') or src.startswith("https://fonts.googleapis.com/css"):
         fmt = 'text/css'
     elif sp.endswith('.js'):
         fmt = 'application/javascript'
+    elif sp.endswith(".html") or sp.endswith(".htm"):
+        fmt = "text/html"
+    elif sp.endswith(".txt") or sp.endswith(".md"):
+        fmt = "text/text"
+    elif sp.endswith(".json"):
+        fmt = "application/json"
     else:
-        # what if it's not a valid font type? may not matter
         fmt = 'image/png'
-    data, extra_data = get(index, src, verbose=verbose)
+
+    if fmt == "text/html":
+        data, extra_data = get_contents_by_selenium(index, src)
+    else:
+        # log(f"{index} , {sp} <- {src} as {fmt}")
+        data, extra_data = get(index, src, verbose=verbose)
+
     if extra_data and extra_data.get('content-type'):
         fmt = extra_data.get('content-type').replace(' ', '')
+
     if data:
-        if sys.version > '3':
-            if type(data) is bytes:
-                return ('data:%s;base64,' % fmt) + bytes.decode(base64.b64encode(data))
-            else:
-                return ('data:%s;base64,' % fmt) + bytes.decode(base64.b64encode(str.encode(data)))
+        if isinstance(data, bytes):
+            return f'data:{fmt};base64,' + bytes.decode(base64.b64encode(data))
         else:
-            reload(sys)
-            sys.setdefaultencoding('utf-8')
-            return ('data:%s;base64,' % fmt) + base64.b64encode(data)
+            return f'data:{fmt};base64,' + bytes.decode(base64.b64encode(str.encode(data)))
     else:
         return absurl(index, src)
 
@@ -181,55 +310,73 @@ def handle_css_content(index, css, verbose=True):
     if not css:
         return css
     if not isinstance(css, str):
-        if sys.version > '3':
-            css = bytes.decode(css)
-            mo = css_encoding_re.search(css)
-        else:
-            mo = css_encoding_re.search(css)
+        css = bytes.decode(css)
+        mo = css_encoding_re.search(css)
         if mo:
             try:
                 css = css.decode(mo.group(1))
             except:
-                log('[ WARN ] failed to convert css to encoding %s' % mo.group(1), 'yellow')
+                log(f'[ WARN ] failed to convert css to encoding {mo.group(1)}')
     # Watch out! how to handle urls which contain parentheses inside? Oh god, css does not support such kind of urls
     # I tested such url in css, and, unfortunately, the css rule is broken. LOL!
     # I have to say that, CSS is awesome!
     reg = re.compile(r'url\s*\((.+?)\)')
 
-    def repl(matchobj):
+    def repl(matchobj) -> str:
         src = matchobj.group(1).strip(' \'"')
         # if src.lower().endswith('woff') or src.lower().endswith('ttf') or src.lower().endswith('otf') or src.lower().endswith('eot'):
         #     # dont handle font data uri currently
         #     return 'url(' + src + ')'
-        return 'url(' + data_to_base64(index, src, verbose=verbose) + ')'
+        base64_str = data_to_base64(index, src, verbose=verbose)
+        return f'url({base64_str})'
 
     css = reg.sub(repl, css)
     return css
 
 
-def generate(index, verbose=True, comment=True, keep_script=False, prettify=False, full_url=True, verify=True,
-             errorpage=False, username=None, password=None, **kwargs):
+def generate(url,
+             verbose=True,
+             comment=True,
+             keep_script=False,
+             prettify=False,
+             full_url=True,
+             verify=True,
+             errorpage=False,
+             username=None, password=None,
+             level: int = 1,
+             **kwargs):
     """
     given a index url such as http://www.google.com, http://custom.domain/index.html
     return generated single html
     """
-    html_doc, extra_data = get(index, verbose=verbose, verify=verify, ignore_error=errorpage,
-                               username=username, password=password)
 
-    if extra_data and extra_data.get('url'):
-        index = extra_data['url']
+    global site_id
+    global base_url
+
+    if level <= 1:
+        base_url = url
+        site_id = make_site_id(url)
+
+    # html_doc, extra_data = get(index, verbose=verbose, verify=verify, ignore_error=errorpage,
+    #                            username=username, password=password)
+    #
+    # if extra_data and extra_data.get('url'):
+    #     index = extra_data['url']
+
+    html_doc, _ = get_contents_by_selenium(url, flg_screen_shot=True)
 
     # now build the dom tree
     soup = BeautifulSoup(html_doc, 'lxml')
     soup_title = soup.title.string if soup.title else ''
+    log(f"[ INFO ] get {soup_title}")
 
     for link in soup('link'):
         if link.get('href'):
+            add_links(absurl(url, link['href']))
             if 'mask-icon' in (link.get('rel') or []) or 'icon' in (link.get('rel') or []) or 'apple-touch-icon' in (
                     link.get('rel') or []) or 'apple-touch-icon-precomposed' in (link.get('rel') or []):
                 link['data-href'] = link['href']
-
-                link['href'] = data_to_base64(index, link['href'], verbose=verbose)
+                link['href'] = data_to_base64(url, link['href'], verbose=verbose)
             elif link.get('type') == 'text/css' or link['href'].lower().endswith('.css') or 'stylesheet' in (
                     link.get('rel') or []):
                 new_type = 'text/css' if not link.get('type') else link['type']
@@ -239,9 +386,10 @@ def generate(index, verbose=True, comment=True, keep_script=False, prettify=Fals
                     if attr in ['href']:
                         continue
                     css[attr] = link[attr]
-                css_data, _ = get(index, relpath=link['href'], verbose=verbose)
-                new_css_content = handle_css_content(absurl(index, link['href']), css_data, verbose=verbose)
-                # if "stylesheet/less" in '\n'.join(link.get('rel') or []).lower():    # fix browser side less: http://lesscss.org/#client-side-usage
+                css_data, _ = get(url, relpath=link['href'], verbose=verbose)
+                new_css_content = handle_css_content(absurl(url, link['href']), css_data, verbose=verbose)
+                # if "stylesheet/less" in '\n'.join(link.get('rel') or []).lower():
+                # fix browser side less: http://lesscss.org/#client-side-usage
                 #     # link['href'] = 'data:text/less;base64,' + base64.b64encode(css_data)
                 #     link['data-href'] = link['href']
                 #     link['href'] = absurl(index, link['href'])
@@ -252,7 +400,9 @@ def generate(index, verbose=True, comment=True, keep_script=False, prettify=Fals
                     link.replace_with(css)
             elif full_url:
                 link['data-href'] = link['href']
-                link['href'] = absurl(index, link['href'])
+                link['href'] = absurl(url, link['href'])
+
+    # Javascript を抜き出す
     for js in soup('script'):
         if not keep_script:
             js.replace_with('')
@@ -262,7 +412,7 @@ def generate(index, verbose=True, comment=True, keep_script=False, prettify=Fals
         new_type = 'text/javascript' if not js.has_attr('type') or not js['type'] else js['type']
         code = soup.new_tag('script', type=new_type)
         code['data-src'] = js['src']
-        js_str, _ = get(index, relpath=js['src'], verbose=verbose)
+        js_str, _ = get(url, relpath=js['src'], verbose=verbose)
         if type(js_str) == bytes:
             js_str = js_str.decode('utf-8')
         try:
@@ -280,11 +430,36 @@ def generate(index, verbose=True, comment=True, keep_script=False, prettify=Fals
                 log(repr(js_str))
             raise
         js.replace_with(code)
+
+    # iframe の内容を取得
+    for i_frame in soup("iframe"):
+        if i_frame.get('src'):
+            log(f"[ DEBUG ] found iframe {i_frame['src']}")
+            # log(absurl(url, i_frame['src']))
+            i_frame['data-src'] = i_frame['src']
+            if level <= 1:
+                i_frame_html = generate(i_frame['src'], level=level + 1)
+                add_links(absurl(url, i_frame['data-src']))
+            else:
+                i_frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
+            i_frame['src'] = 'data:text/html;base64,' + base64.b64encode(i_frame_html.encode()).decode()
+
+    # iframe の内容を取得
+    for frame in soup("frame"):
+        if frame.get('src'):
+            log(f"[ DEBUG ] found frames {frame['src']}")
+            frame['data-src'] = frame['src']
+            if level <= 1:
+                frame_html = generate(frame['src'], level=level + 1)
+                add_links(absurl(url, frame['data-src']))
+            else:
+                frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
+            frame['src'] = 'data:text/html;base64,' + base64.b64encode(frame_html.encode()).decode()
     for img in soup('img'):
         if not img.get('src'):
             continue
         img['data-src'] = img['src']
-        img['src'] = data_to_base64(index, img['src'], verbose=verbose)
+        img['src'] = data_to_base64(url, img['src'], verbose=verbose)
 
         # `img` elements may have `srcset` attributes with multiple sets of images.
         # To get a lighter document it will be cleared, and used only the standard `src` attribute
@@ -296,101 +471,116 @@ def generate(index, verbose=True, comment=True, keep_script=False, prettify=Fals
             img['data-srcset'] = img['srcset']
             del img['srcset']
             if verbose:
-                log('[ WARN ] srcset found in img tag. Attribute will be cleared. File src => %s' % (img['data-src']),
-                    'yellow')
+                log(f"[ WARN ] srcset found in img tag. Attribute will be cleared. File src => {img['data-src']}")
 
         def check_alt(attr):
             if img.has_attr(attr) and img[attr].startswith('this.src='):
                 # we do not handle this situation yet, just warn the user
                 if verbose:
-                    log('[ WARN ] %s found in img tag and unhandled, which may break page' % (attr), 'yellow')
+                    log(f'[ WARN ] {attr} found in img tag and unhandled, which may break page')
 
         check_alt('onerror')
         check_alt('onmouseover')
         check_alt('onmouseout')
+
     for tag in soup(True):
         if full_url and tag.name == 'a' and tag.has_attr('href') and not tag['href'].startswith('#'):
             tag['data-href'] = tag['href']
-            tag['href'] = absurl(index, tag['href'])
+            tag['href'] = absurl(url, tag['href'])
+            add_links(tag['href'])
         if tag.has_attr('style'):
             if tag['style']:
-                tag['style'] = handle_css_content(index, tag['style'], verbose=verbose)
+                tag['style'] = handle_css_content(url, tag['style'], verbose=verbose)
         elif tag.name == 'link' and tag.has_attr('type') and tag['type'] == 'text/css':
             if tag.string:
-                tag.string = handle_css_content(index, tag.string, verbose=verbose)
+                tag.string = handle_css_content(url, tag.string, verbose=verbose)
         elif tag.name == 'style':
             if tag.string:
-                tag.string = handle_css_content(index, tag.string, verbose=verbose)
+                tag.string = handle_css_content(url, tag.string, verbose=verbose)
 
-    # finally insert some info into comments
-    if comment:
-        for html in soup('html'):
-            html.insert(0, BeautifulSoup('<!-- \n single html processed by https://github.com/zTrix/webpage2html\n '
-                                         'title: %s\n url: %s\n date: %s\n-->' % (soup_title, index, datetime.datetime.
-                                                                                  now().ctime()), 'lxml'))
-            break
-    if prettify:
+    if level > 1:
         return soup.prettify(formatter='html')
-    else:
-        return str(soup)
+
+    html_file_path = f"{download_dir}/html/{site_id}.html"
+    with open(html_file_path, 'w') as f:
+        f.write(soup.prettify(formatter='html'))
+
+    save_links()
+    save_url_id_list()
+    # if prettify:
+    #     return soup.prettify(formatter='html')
+    # else:
+    #     return str(soup)
 
 
-def usage():
-    print("""
-usage:
+def save_links():
+    global external_links
+    global internal_links
+    global base_url
 
-    $ webpage2html [options] some_url
+    links = [base_url]
+    internal_links.sort()
+    for url in sorted(set(internal_links)):
+        if url not in links:
+            links.append(url)
+    for url in sorted(set(external_links)):
+        if url not in links:
+            links.append(url)
 
-options:
+    link_file_path = f"{download_dir}/link/{site_id}.txt"
+    with open(link_file_path, 'w') as f:
+        f.write("\n".join(links))
 
-    -h, --help              help page, you are reading this now!
-    -q, --quiet             don't show verbose url get log in stderr
-    -s, --script            keep javascript in the generated html
 
-examples:
+def save_url_id_list():
+    global site_id
+    global base_url
+    link_file_path = f"{download_dir}/url_id_list.txt"
+    date = datetime.datetime.today().isoformat().split('.')[0].replace("T", " ")
+    text = f"{site_id}\t{base_url}\t{date}\n"
+    with open(link_file_path, 'a') as f:
+        f.write(text)
 
-    $ webpage2html -h
-        you are reading this help message
+#
+# def usage():
+#     print("""
+# usage:
+#
+#     $ poetry run webpage2html URL
+#
+# examples:
+#     $ poetry run webpage2html http://www.google.com
+#     $ poetry run webpage2html http://gabrielecirulli.github.io/2048/
+# """)
+#
+#
+# def main(kwargs):
+#     kwargs = {}
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('-q', '--quiet', action='store_true', help="don't show verbose url get log in stderr")
+#     parser.add_argument("url", help="the website to store")
+#     args = parser.parse_args()
+#
+#     args.verbose = not args.quiet
+#     args.keep_script = args.script
+#     args.verify = not args.insecure
+#     args.index = args.url
+#     kwargs = vars(args)
+#
+#     rs = generate(**kwargs)
+#     if args.output and args.output != '-':
+#         with open(args.output, 'wb') as f:
+#             f.write(rs.encode())
+#     else:
+#         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+#         sys.stdout.write(rs)
 
-    $ webpage2html http://www.google.com > google.html
-        save google index page for offline reading, keep style untainted
-
-    $ webpage2html -s http://gabrielecirulli.github.io/2048/ > 2048.html
-        save dynamic page with Javascript example
-        the 2048 game can be played offline after being saved
-
-    $ webpage2html /path/to/xxx.html > xxx_single.html
-        combine local saved xxx.html with a directory named xxx_files together into a single html file
-""")
-
+def short_cut(url):
+    generate(url)
 
 def main():
-    kwargs = {}
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-q', '--quiet', action='store_true', help="don't show verbose url get log in stderr")
-    parser.add_argument('-s', '--script', action='store_true', help="keep javascript in the generated html")
-    parser.add_argument('-k', '--insecure', action='store_true', help="ignore the certificate")
-    parser.add_argument('-o', '--output', help="save output to")
-    parser.add_argument('-u', '--username', help="use HTTP basic auth with specified username")
-    parser.add_argument('-p', '--password', help="use HTTP basic auth with specified password")
-    parser.add_argument('--errorpage', action='store_true', help="crawl an error page")
-    parser.add_argument("url", help="the website to store")
-    args = parser.parse_args()
+    fire.Fire(short_cut)
 
-    args.verbose = not args.quiet
-    args.keep_script = args.script
-    args.verify = not args.insecure
-    args.index = args.url
-    kwargs = vars(args)
-
-    rs = generate(**kwargs)
-    if args.output and args.output != '-':
-        with open(args.output, 'wb') as f:
-            f.write(rs.encode())
-    else:
-        sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
-        sys.stdout.write(rs)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+
