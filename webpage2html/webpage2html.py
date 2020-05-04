@@ -65,15 +65,22 @@ internal_links = []
 base_url = ""
 
 
-def add_links(url):
+def add_links(url: str = "") -> None:
+    """
+    リンクを外部と内部を分けて，リストにURLを追加する
+
+    """
     global external_links
     global internal_links
     global base_url
     # log(f"{url} {base_url}")
-    if url.count("/") < 3:
-        return None
+
     if url.lower().startswith('http'):
-        if url.split("/")[2] == base_url.split("/")[2]:
+        if url.count("/") < 3 and base_url.startswith(url.split("?")[0]):
+            internal_links.append(url)
+        elif url.count("/") < 3:
+            external_links.append(url)
+        elif url.split("/")[2] == base_url.split("/")[2]:
             internal_links.append(url)
         else:
             external_links.append(url)
@@ -201,7 +208,7 @@ def get_contents_by_selenium(url: str = None,
         if usecache:
             contents = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
             webpage2html_cache[full_path] = contents
-        return contents, {'url': url, 'content-type': "text/html"}
+            return contents, {'url': url, 'content-type': "text/html"}
 
     log(f"[ DEBUG ] - Get by selenium: {url} as {site_id}")
     options = webdriver.ChromeOptions()
@@ -312,7 +319,7 @@ def data_to_base64(index, src, verbose=True):
         return absurl(index, src)
 
 
-css_encoding_re = re.compile(r'''@charset\s+["']([-_a-zA-Z0-9]+)["']\;''', re.I)
+css_encoding_re = re.compile(r'''@charset\s+["']([-_a-zA-Z0-9]+)["'];''', re.I)
 
 
 def handle_css_content(index, css, verbose=True):
@@ -518,7 +525,6 @@ def generate(url,
     html_file_path = f"{download_dir}/html/{site_id}.html"
 
     result = soup.prettify(formatter='html5').replace("url(data:image/jpg;base64,", "url(data:image/jpeg;base64,")
-    reg_data_scheme = re.compile(r'url\s*\((data:.+?)\)')
     result = re.sub(r'url\s*\((data:.+?)\)', r'url("\1")', result)
 
     with open(html_file_path, 'w') as f:
