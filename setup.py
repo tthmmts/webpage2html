@@ -11,7 +11,8 @@ setup(
     license='LICENSE.txt',
     keywords="webpage html convert",
     description='Save/convert web pages to a single editable html file',
-    long_description='View https://github.com/zTrix/webpage2html for project description and usage',
+    long_description='View  for project description and usage',
+
 
     py_modules=['webpage2html'],
 
@@ -24,19 +25,6 @@ setup(
         ]
     },
     classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'Environment :: Console',
-        'Intended Audience :: Developers',
-        'Operating System :: POSIX',
-        'Operating System :: MacOS :: MacOS X',
-        'Programming Language :: Python',
-        'Programming Language :: Python :: 2.6',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Topic :: Software Development',
-        'Topic :: System',
-        'Topic :: Terminals',
-        'Topic :: Utilities',
+
     ],
 )
