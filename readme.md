@@ -12,6 +12,9 @@ The basic idea is to insert all CSS/javascript files into HTML directly, and use
 ## install
 
 ```bash
+$ cd {arbitrary directory}
+$ git clone https://github.com/tthmmts/webpage2html
+$ cd webpage2html
 $ poetry install
 ```
 
@@ -20,7 +23,7 @@ $ poetry install
 Save web page directly
 
 ```bash
-$ poetry run webpage2html https://www.google.com
+$ poetry run webpage2html https://www.google.com/
 ```
 
 ## Dependency
@@ -35,7 +38,7 @@ If you want to use an arbitrary Chrome version, you update (or downgrade) chrome
 $ poetry add chromedriver-binary@^83.0.0
 ```
 
-I have tried the default `HTMLParser` and `html5lib` as the backend parser for BeautifulSoup, but both of them are buggy, `HTMLParser` handles self-closing tags (like `<br>` `<meta>`) incorrectly(it will wait for closing tag for `<br>`, so If too many `<br>` tags exist in the HTML, BeautifulSoup will complain `RuntimeError: maximum recursion depth exceeded`), and `html5lib` will encode encoded HTML entities such as `&lt;` again to `&amp;lt;`, which is definitly unacceptable. I have tested many cases, and `lxml` works perfectly, so I choose to use `lxml` now.
+~~I have tried the default `HTMLParser` and `html5lib` as the backend parser for BeautifulSoup, but both of them are buggy, `HTMLParser` handles self-closing tags (like `<br>` `<meta>`) incorrectly(it will wait for closing tag for `<br>`, so If too many `<br>` tags exist in the HTML, BeautifulSoup will complain `RuntimeError: maximum recursion depth exceeded`), and `html5lib` will encode encoded HTML entities such as `&lt;` again to `&amp;lt;`, which is definitly unacceptable. I have tested many cases, and `lxml` works perfectly, so I choose to use `lxml` now.~~
 
 ## Unsupported Cases
 
