@@ -70,11 +70,12 @@ def add_links(url: str = "") -> None:
     """
     リンクを外部と内部を分けて，リストにURLを追加する
 
+    Args:
+        url (str): target URL
     """
     global external_links
     global internal_links
     global base_url
-    # log(f"{url} {base_url}")
 
     if url.lower().startswith('http'):
         if url.count("/") < 3 and base_url.startswith(url.split("?")[0]):
@@ -87,7 +88,7 @@ def add_links(url: str = "") -> None:
             external_links.append(url)
 
 
-def absurl(index, relpath=None, normpath=None):
+def absurl(index, relpath: str = None, normpath: str = None):
     if normpath is None:
         normpath = lambda x: x
     if index.lower().startswith('http') or (relpath and relpath.startswith('http')):
@@ -126,11 +127,11 @@ def get_contents(url: str = None, relpath: str = None, verbose: bool = True, use
     global download_dir
     global user_agent
 
-    if index.startswith('http') or (relpath and relpath.startswith('http')):
-        full_path = absurl(index, relpath)
+    if url.startswith('http') or (relpath and relpath.startswith('http')):
+        full_path = absurl(url, relpath)
         if not full_path:
             if verbose:
-                log(f'[ WARN ] invalid path, {index} {relpath}')
+                log(f'[ WARN ] invalid path, {url} {relpath}')
             return '', None
         # urllib2 only accepts valid url, the following code is taken from urllib
         # http://svn.python.org/view/python/trunk/Lib/urllib.py?r1=71780&r2=71779&pathrev=71780
@@ -169,13 +170,13 @@ def get_contents(url: str = None, relpath: str = None, verbose: bool = True, use
             if verbose:
                 log(f'[ WARN ] ??? - {full_path}: {ex}')
             return '', None
-    elif os.path.exists(index):
+    elif os.path.exists(url):
         if relpath:
             relpath = relpath.split('#')[0].split('?')[0]
             if os.path.exists(relpath):
                 full_path = relpath
             else:
-                full_path = os.path.normpath(os.path.join(os.path.dirname(index), relpath))
+                full_path = os.path.normpath(os.path.join(os.path.dirname(url), relpath))
             try:
                 ret = open(full_path, 'rb').read()
                 if verbose:
@@ -188,18 +189,18 @@ def get_contents(url: str = None, relpath: str = None, verbose: bool = True, use
                 return '', None
         else:
             try:
-                ret = open(index, 'rb').read()
+                ret = open(url, 'rb').read()
                 if verbose:
-                    log(f'[ LOCAL ] found - {index}')
+                    log(f'[ LOCAL ] found - {url}')
                 return ret, None
             except IOError as err:
                 if verbose:
                     msg = str(err)
-                    log(f'[ WARN ] file not found - {index} {msg}')
+                    log(f'[ WARN ] file not found - {url} {msg}')
                 return '', None
     else:
         if verbose:
-            log(f'[ ERROR ] invalid index - {index}')
+            log(f'[ ERROR ] invalid index - {url}')
         return '', None
 
 
@@ -248,11 +249,13 @@ def get_contents_by_selenium(url: str = None,
 
     if not url.startswith("http"):
         if usecache:
-            contents = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
+            contents = "<!DOCTYPE html><html lang='en'>" \
+                       "<head><meta charset='utf-8'><title>No title</title></head>" \
+                       "<body><!-- No content --></body></html>"
             webpage2html_cache[full_path] = contents
             return contents, {'url': url, 'content-type': "text/html"}
 
-    log(f"[ DEBUG ] - Get by selenium: {url} as {site_id}")
+    log(f"[DEBUG] - Get by selenium: {url} as {site_id}")
     options = webdriver.ChromeOptions()
     options.add_argument('--headless')
     options.add_argument("--incognito")
@@ -292,7 +295,9 @@ def get_contents_by_selenium(url: str = None,
                     driver.save_screenshot(f'{download_dir}/image/{site_id}.png')
             except TimeoutException as ex:
                 log(f"[ERROR]\tTimeoutException: '{ex}'")
-                html_text = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>No title</title></head><body><!-- No content --></body></html>"
+                html_text = "<!DOCTYPE html><html lang='en'>" \
+                            "<head><meta charset='utf-8'><title>No title</title></head>" \
+                            "<body><!-- No content --></body></html>"
             else:
                 driver.quit()
     except Exception as ex:
@@ -300,6 +305,7 @@ def get_contents_by_selenium(url: str = None,
         log(f"[WARN]\tGet web page by request without screenshot")
         return get_contents(url, referer_url=referer_url)
 
+    # キャッシュが有効な場合，キャッシュに追加．
     if usecache:
         webpage2html_cache[full_path] = html_text
 
@@ -361,8 +367,6 @@ def data_to_base64(index, src, verbose: bool = True, referer_url: str = None):
     if extra_data and extra_data.get('content-type'):
         fmt = extra_data.get('content-type').strip().replace(' ', '')
 
-    if fmt == "image/jpg":
-        fmt = "image/jpeg"
     if data:
         # log(f"{index}, {fmt}, {type(data)}")
         if isinstance(data, bytes):
@@ -395,7 +399,8 @@ def handle_css_content(index, css, verbose=True, referer_url: str = None):
 
     def repl(matchobj) -> str:
         src = matchobj.group(1).strip(' \'"')
-        # if src.lower().endswith('woff') or src.lower().endswith('ttf') or src.lower().endswith('otf') or src.lower().endswith('eot'):
+        # if src.lower().endswith('woff') or src.lower().endswith('ttf') \
+        # or src.lower().endswith('otf') or src.lower().endswith('eot'):
         #     # dont handle font data uri currently
         #     return 'url(' + src + ')'
         base64_str = data_to_base64(index, src, verbose=verbose, referer_url=referer_url)
@@ -446,8 +451,10 @@ def generate(url,
     for link in soup('link'):
         if link.get('href'):
             # add_links(absurl(url, link['href']))
-            if 'mask-icon' in (link.get('rel') or []) or 'icon' in (link.get('rel') or []) or 'apple-touch-icon' in (
-                    link.get('rel') or []) or 'apple-touch-icon-precomposed' in (link.get('rel') or []):
+            if 'mask-icon' in (link.get('rel') or []) or \
+                    'icon' in (link.get('rel') or []) or \
+                    'apple-touch-icon' in (link.get('rel') or []) or \
+                    'apple-touch-icon-precomposed' in (link.get('rel') or []):
                 link['data-href'] = link['href']
                 link['href'] = data_to_base64(url, link['href'], verbose=verbose)
             elif link.get('type') == 'text/css' or \
@@ -523,7 +530,10 @@ def generate(url,
                 i_frame_html = generate(i_frame['src'], level=level + 1, referer_url=referer_url)
                 add_links(absurl(url, i_frame['data-src']))
             else:
-                i_frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
+                i_frame_html = "<!DOCTYPE html>" \
+                               "<html lang='en'><head><meta charset='utf-8'>" \
+                               "<title>Grandchild title</title></head>" \
+                               "<body><!-- Grandchild content --></body></html>"
             i_frame['src'] = 'data:text/html;base64,' + base64.b64encode(i_frame_html.encode()).decode()
 
     # iframe の内容を取得
@@ -535,7 +545,9 @@ def generate(url,
                 frame_html = generate(frame['src'], level=level + 1, referer_url=referer_url)
                 add_links(absurl(url, frame['data-src']))
             else:
-                frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
+                frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>" \
+                             "<title>Grandchild title</title></head>" \
+                             "<body><!-- Grandchild content --></body></html>"
             frame['src'] = 'data:text/html;base64,' + base64.b64encode(frame_html.encode()).decode()
     for img in soup('img'):
         if not img.get('src'):
@@ -572,10 +584,14 @@ def generate(url,
         elif tag.name == "meta" and tag.has_attr('http-equiv') and tag['http-equiv'].lower() == "content-type" \
                 and tag.has_attr('content'):
             tag["content"] = "text/html; charset=UTF-8"
+
+        # リンクを抜き出し
         if full_url and tag.name == 'a' and tag.has_attr('href') and not tag['href'].startswith('#'):
             tag['data-href'] = tag['href']
             tag['href'] = absurl(url, tag['href'])
             add_links(tag['href'])
+
+        # スタイルシートを抜き出し
         if tag.has_attr('style'):
             if tag['style']:
                 tag['style'] = handle_css_content(url, tag['style'], verbose=verbose)
@@ -586,24 +602,24 @@ def generate(url,
             if tag.string:
                 tag.string = handle_css_content(url, tag.string, verbose=verbose)
 
-    if level > 1:
-        return soup.prettify(formatter='html5')
+    # 出力データの生成
+    result = soup.prettify(formatter='html5')
 
-    html_file_path = f"{download_dir}/html/{site_id}.html"
+    # MIME image/jpeg が image/jpg になるので置換する
+    result = result.replace("url(data:image/jpg;base64,", "url(data:image/jpeg;base64,")
 
-    result = soup.prettify(formatter='html5').replace("url(data:image/jpg;base64,", "url(data:image/jpeg;base64,")
+    # CSS の URL（STR） をクオートで囲む
     result = re.sub(r'url\s*\((data:.+?)\)', r'url("\1")', result)
 
-    with open(html_file_path, 'w') as f:
-        # f.write(str(soup))
-        f.write(result)
+    if level > 1:
+        return soup.prettify(formatter='html5')
+    else:
+        html_file_path = f"{download_dir}/html/{site_id}.html"
+        with open(html_file_path, 'w') as f:
+            f.write(result)
 
-    save_links()
-    save_url_id_list()
-    # if prettify:
-    #     return soup.prettify(formatter='html')
-    # else:
-    #     return str(soup)
+        save_links()
+        save_url_id_list()
 
 
 def save_links():
