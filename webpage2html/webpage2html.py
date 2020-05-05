@@ -505,6 +505,12 @@ def generate(url,
         check_alt('onmouseout')
 
     for tag in soup(True):
+        # HTMLの文字コードにUTF-8を設定する
+        if tag.name == "meta" and tag.has_attr('charset') and tag['charset'].lower() != "uft-8":
+            tag["charset"] = "UTF-8"
+        elif tag.name == "meta" and tag.has_attr('http-equiv') and tag['http-equiv'].lower() == "content-type" \
+                and tag.has_attr('content'):
+            tag["content"] = "text/html; charset=UTF-8"
         if full_url and tag.name == 'a' and tag.has_attr('href') and not tag['href'].startswith('#'):
             tag['data-href'] = tag['href']
             tag['href'] = absurl(url, tag['href'])
