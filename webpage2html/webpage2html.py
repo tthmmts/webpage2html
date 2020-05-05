@@ -63,6 +63,7 @@ site_id = ""
 external_links = []
 internal_links = []
 base_url = ""
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.14; rv:75.0) Gecko/20100101 Firefox/75.0"
 
 
 def add_links(url: str = "") -> None:
@@ -99,12 +100,31 @@ def absurl(index, relpath=None, normpath=None):
             return index
 
 
-def get(index, relpath=None, verbose=True, usecache=True,
-        verify=True, ignore_error=False, username=None,
-        password=None):
+def get_contents(url: str = None, relpath: str = None, verbose: bool = True, usecache: bool = True,
+                 verify: bool = True, ignore_error: bool = False, username: str = None,
+                 password: str = None, referer_url: str = ""):
+    """
+    Webコンテンツを取得する
+
+    Args:
+        url:
+        relpath:
+        verbose:
+        usecache:
+        verify:
+        ignore_error:
+        username:
+        password:
+        referer_url:
+
+    Returns:
+
+    """
+
     global webpage2html_cache
     global site_id
     global download_dir
+    global user_agent
 
     if index.startswith('http') or (relpath and relpath.startswith('http')):
         full_path = absurl(index, relpath)
@@ -120,10 +140,14 @@ def get(index, relpath=None, verbose=True, usecache=True,
                 if verbose:
                     log(f'[ CACHE HIT ] - {full_path}')
                 return webpage2html_cache[full_path], None
-
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:65.0) Gecko/20100101 Firefox/65.0'
+            "accept": "image/webp,image/*,*/*;q=0.8",
+            "accept-language": "ja,en-US;q=0.9,en;q=0.8",
+            "user-agent": user_agent
         }
+        if referer_url is not None and referer_url != "":
+            headers.update({"referer": referer_url})
+
         auth = None
         if username and password:
             auth = requests.auth.HTTPBasicAuth(username, password)
@@ -180,21 +204,39 @@ def get(index, relpath=None, verbose=True, usecache=True,
 
 
 def get_contents_by_selenium(url: str = None,
-                             relpath=None,
-                             verbose=True,
-                             usecache=True,
-                             verify=True,
-                             ignore_error=False,
-                             username=None,
-                             password=None,
-                             flg_screen_shot: bool = False
+                             relpath: str = None,
+                             verbose: bool = True,
+                             usecache: bool = True,
+                             verify: bool = True,
+                             ignore_error: bool = False,
+                             username: str = None,
+                             password: str = None,
+                             flg_screen_shot: bool = False,
+                             referer_url: str = ""
                              ) -> tuple:
     """
-    Selenium を利用してHTMLファイルをダウンロードする．
+    Selenium を利用して，Webコンテンツを取得する
+
+    Args:
+        url:
+        relpath:
+        verbose:
+        usecache:
+        verify:
+        ignore_error:
+        username:
+        password:
+        flg_screen_shot:
+        referer_url:
+
+    Returns:
+
     """
+
     global site_id
     global download_dir
     global webpage2html_cache
+    global user_agent
 
     url = absurl(url, base_url)
     full_path = quote(url, safe="%/:=&?~#+!$,;'@()*[]")
@@ -218,10 +260,11 @@ def get_contents_by_selenium(url: str = None,
     options.add_argument("--test-type")
 
     if not chromedriver_binary:
-        return get(url)
+        return get_contents(url, referer_url=referer_url)
     try:
         with webdriver.Chrome(options=options) as driver:
             try:
+                user_agent = driver.execute_script("return navigator.userAgent;")
                 driver.get(url)
                 if flg_screen_shot:
                     width = driver.execute_script("return document.body.scrollWidth;")
@@ -244,7 +287,7 @@ def get_contents_by_selenium(url: str = None,
     except Exception as ex:
         log(f"[ERROR]\twebdriver Chrome: '{ex}'")
         log(f"[WARN]\tGet web page by request without screenshot")
-        return get(url)
+        return get_contents(url, referer_url=referer_url)
 
     if usecache:
         webpage2html_cache[full_path] = html_text
@@ -252,7 +295,7 @@ def get_contents_by_selenium(url: str = None,
     return html_text, {'url': url, 'content-type': "text/html"}
 
 
-def data_to_base64(index, src, verbose=True):
+def data_to_base64(index, src, verbose: bool = True, referer_url: str = None):
     # doc here: http://en.wikipedia.org/wiki/Data_URI_scheme
     sp = urlparse(src).path.lower()
     if src.strip().startswith('data:'):
@@ -297,11 +340,12 @@ def data_to_base64(index, src, verbose=True):
     else:
         fmt = 'image/png'
 
+    # html ファイルの場合 Selenium を利用して取得する．それ以外は，referer をつけて Requestsを利用する．
     if fmt == "text/html":
         data, extra_data = get_contents_by_selenium(index, src)
     else:
         # log(f"{index} , {sp} <- {src} as {fmt}")
-        data, extra_data = get(index, src, verbose=verbose)
+        data, extra_data = get_contents(index, src, verbose=verbose, referer_url=referer_url)
 
     if extra_data and extra_data.get('content-type'):
         fmt = extra_data.get('content-type').strip().replace(' ', '')
@@ -322,7 +366,7 @@ def data_to_base64(index, src, verbose=True):
 css_encoding_re = re.compile(r'''@charset\s+["']([-_a-zA-Z0-9]+)["'];''', re.I)
 
 
-def handle_css_content(index, css, verbose=True):
+def handle_css_content(index, css, verbose=True, referer_url: str = None):
     if not css:
         return css
     if not isinstance(css, str):
@@ -343,10 +387,7 @@ def handle_css_content(index, css, verbose=True):
         # if src.lower().endswith('woff') or src.lower().endswith('ttf') or src.lower().endswith('otf') or src.lower().endswith('eot'):
         #     # dont handle font data uri currently
         #     return 'url(' + src + ')'
-        base64_str = data_to_base64(index, src, verbose=verbose)
-
-        # log(f'url("{base64_str}")'[:40])
-
+        base64_str = data_to_base64(index, src, verbose=verbose, referer_url=referer_url)
         return f'url("{base64_str}")'
 
     css = reg.sub(repl, css)
@@ -383,6 +424,7 @@ def generate(url,
     #     index = extra_data['url']
 
     html_doc, _ = get_contents_by_selenium(url, flg_screen_shot=True)
+    referer_url = url
 
     # now build the dom tree
     # soup = BeautifulSoup(html_doc, 'lxml')
@@ -407,8 +449,16 @@ def generate(url,
                     if attr in ['href']:
                         continue
                     css[attr] = link[attr]
-                css_data, _ = get(url, relpath=link['href'], verbose=verbose)
-                new_css_content = handle_css_content(absurl(url, link['href']), css_data, verbose=verbose)
+
+                css_data, _ = get_contents(url,
+                                           relpath=link['href'],
+                                           verbose=verbose,
+                                           referer_url=referer_url)
+
+                new_css_content = handle_css_content(absurl(url, link['href']),
+                                                     css_data,
+                                                     verbose=verbose,
+                                                     referer_url=referer_url)
                 # if "stylesheet/less" in '\n'.join(link.get('rel') or []).lower():
                 # fix browser side less: http://lesscss.org/#client-side-usage
                 #     # link['href'] = 'data:text/less;base64,' + base64.b64encode(css_data)
@@ -433,7 +483,7 @@ def generate(url,
         new_type = 'text/javascript' if not js.has_attr('type') or not js['type'] else js['type']
         code = soup.new_tag('script', type=new_type)
         code['data-src'] = js['src']
-        js_str, _ = get(url, relpath=js['src'], verbose=verbose)
+        js_str, _ = get_contents(url, relpath=js['src'], verbose=verbose, referer_url=referer_url)
         if type(js_str) == bytes:
             js_str = js_str.decode('utf-8')
         try:
@@ -459,7 +509,7 @@ def generate(url,
             # log(absurl(url, i_frame['src']))
             i_frame['data-src'] = i_frame['src']
             if level <= 1:
-                i_frame_html = generate(i_frame['src'], level=level + 1)
+                i_frame_html = generate(i_frame['src'], level=level + 1, referer_url=referer_url)
                 add_links(absurl(url, i_frame['data-src']))
             else:
                 i_frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
@@ -471,7 +521,7 @@ def generate(url,
             log(f"[ DEBUG ] found frames {frame['src']}")
             frame['data-src'] = frame['src']
             if level <= 1:
-                frame_html = generate(frame['src'], level=level + 1)
+                frame_html = generate(frame['src'], level=level + 1, referer_url=referer_url)
                 add_links(absurl(url, frame['data-src']))
             else:
                 frame_html = "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Grandchild title</title></head><body><!-- Grandchild content --></body></html>"
