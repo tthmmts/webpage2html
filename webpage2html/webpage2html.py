@@ -265,15 +265,26 @@ def get_contents_by_selenium(url: str = None,
         with webdriver.Chrome(options=options) as driver:
             try:
                 user_agent = driver.execute_script("return navigator.userAgent;")
+                driver.set_window_size(1920, 1080)
                 driver.get(url)
                 if flg_screen_shot:
-                    width = driver.execute_script("return document.body.scrollWidth;")
+                    width = driver.execute_script("return document.body.clientWidth;")
                     driver.set_window_size(max(width, 1920), 1080)
                     time.sleep(2)
-                    height = driver.execute_script("return document.body.scrollHeight;")
-                    driver.set_window_size(max(width, 1920), height)
+                    height = driver.execute_script("""
+                        var maxHeight = document.body.clientHeight;
+                        var childrenNodes = document.body.children;
+                        for (const num in childrenNodes) {
+                          if (! isNaN(childrenNodes[num].clientHeight)){
+                            if (childrenNodes[num].clientHeight >maxHeight)
+                              {maxHeight = childrenNodes[num].clientHeight;}
+                            }
+                        };
+                        return maxHeight;""")
+                    # log(height)
+                    driver.set_window_size(max(width, 1920), max(height, 1080))
                     time.sleep(2)
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                    driver.execute_script(f"window.scrollTo(0, {height})")
                     time.sleep(12)
                     driver.execute_script("window.scrollTo(0, 0)")
                     time.sleep(2)
