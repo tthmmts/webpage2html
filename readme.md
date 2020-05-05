@@ -1,13 +1,13 @@
 # Webpage2html
 
-## Webpage2html: Save web page to a single html file
+## Webpage2html: Save web page to a single HTML file
 
 Original [webpage2html] script is developed by [zTrix].
 
-This is a simple script to save a web page to a single html file, screenshot image file, link url list,.
-No mhtml or pdf stuff, no xxx_files directory, just one single readable and editable html file.
+This is a simple script to save a web page to a single HTML file, screenshot image file, link URLs list.
+No mhtml or pdf stuff, no xxx_files directory, just one single readable and editable HTML file.
 
-The basic idea is to insert all css/javascript files into html directly, and use base64 data URI for image data.
+The basic idea is to insert all CSS/javascript files into HTML directly, and use base64 data URI for image data.
 
 ## install
 
@@ -25,23 +25,23 @@ $ poetry run webpage2html https://www.google.com
 
 ## Dependency
 
-This script require Python 3.7 or 3.8 with beautifulsoup4, lxml, fire, requests, selenium, chromedriver-binary packages and Google Chrome bwowser.
+This script requires Python 3.7 or 3.8 with beautifulsoup4, chardet, lxml, html5lib, fire, requests, selenium, chromedriver-binary packages, and Google Chrome browser.
 
-If you want to downlaod screenshots of Web page, you must get [Google Chrome version 81](https://www.google.com/intl/en/chrome/).
+If you want to download screenshots of the Web page, you must get [Google Chrome version 81](https://www.google.com/intl/en/chrome/).
 
-If you want to use arbitrary Chrome version, you update (or downgrade) chromedriver-binary package at your own risk.
+If you want to use an arbitrary Chrome version, you update (or downgrade) chromedriver-binary package at your own risk.
 
 ```bash
 $ poetry add chromedriver-binary@^83.0.0
 ```
 
-I have tried the default `HTMLParser` and `html5lib` as the backend parser for BeautifulSoup, but both of them are buggy, `HTMLParser` handles self closing tags (like `<br>` `<meta>`) incorrectly(it will wait for closing tag for `<br>`, so If too many `<br>` tags exist in the html, BeautifulSoup will complain `RuntimeError: maximum recursion depth exceeded`), and `html5lib` will encode encoded html entities such as `&lt;` again to `&amp;lt;`, which is definitly unacceptable. I have tested many cases, and `lxml` works perfectly, so I choose to use `lxml` now.
+I have tried the default `HTMLParser` and `html5lib` as the backend parser for BeautifulSoup, but both of them are buggy, `HTMLParser` handles self-closing tags (like `<br>` `<meta>`) incorrectly(it will wait for closing tag for `<br>`, so If too many `<br>` tags exist in the HTML, BeautifulSoup will complain `RuntimeError: maximum recursion depth exceeded`), and `html5lib` will encode encoded HTML entities such as `&lt;` again to `&amp;lt;`, which is definitly unacceptable. I have tested many cases, and `lxml` works perfectly, so I choose to use `lxml` now.
 
 ## Unsupported Cases
 
-### browser side less compiling
+### browser-side less compiling
 
-The page embeds less css directly and use less.js to compile in browser. In this case, I still cannot find a way to embed the less code into generated html to make it work.
+The page embeds less CSS directly and uses less.js to compile in the browser. In this case, I still cannot find a way to embed the less code into generated HTML to make it work.
 
 ```
 <link rel="stylesheet/less" type="text/css" href="http://dghubble.com/blog/theme/css/style.less">
@@ -53,7 +53,7 @@ The page embeds less css directly and use less.js to compile in browser. In this
 
 ### srcset attribute in img tag (html5)
 
-Currently srcset is discarded.
+Currently,  the srcset is discarded.
 
 # Contributors
 
@@ -65,7 +65,7 @@ Currently srcset is discarded.
 
 # License
 
-[webpage2html] use [SATA License](LICENSE.txt) (Star And Thank Author License), so you have to star this project before using. Read the [license](LICENSE.txt) carefully.
+[webpage2html] use [SATA License](LICENSE.txt) (Star And Thank Author License), so you have to add star this project before using. Read the [license](LICENSE.txt) carefully.
 
 [webpage2html]: https://github.com/zTrix/webpage2html
 [ztrix]: https://github.com/zTrix
