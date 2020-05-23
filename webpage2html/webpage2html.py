@@ -2,9 +2,11 @@ import base64
 import datetime
 import hashlib
 import os
+from datetime import timezone, timedelta, datetime
 import re
 import sys
 import time
+import json
 from pathlib import Path
 from urllib.parse import urlparse, urlunsplit, urljoin, quote
 
@@ -17,6 +19,7 @@ from selenium.common.exceptions import TimeoutException
 
 re_css_url = re.compile(r'(url\(.*?\))')
 webpage2html_cache = {}
+getting_time = 0
 
 
 def log(s, new_line=True):
@@ -51,7 +54,11 @@ def prepare_download() -> str:
 def make_site_id(url: str = "") -> str:
     """
     ダウンロードのディレクトリの準備
+
+    Args:
+        url (str): URL
     """
+
     result = hashlib.sha256(url.encode()).digest()
     # log(type(result))
     hash_str = base64.b32encode(result).decode("utf8")
@@ -213,8 +220,7 @@ def get_contents_by_selenium(url: str = None,
                              username: str = None,
                              password: str = None,
                              flg_screen_shot: bool = False,
-                             referer_url: str = ""
-                             ) -> tuple:
+                             referer_url: str = "") -> tuple:
     """
     Selenium を利用して，Webコンテンツを取得する
 
@@ -238,6 +244,7 @@ def get_contents_by_selenium(url: str = None,
     global download_dir
     global webpage2html_cache
     global user_agent
+    global getting_time
 
     url = absurl(url, base_url)
     full_path = quote(url, safe="%/:=&?~#+!$,;'@()*[]")
@@ -273,7 +280,7 @@ def get_contents_by_selenium(url: str = None,
                 if flg_screen_shot:
                     width = driver.execute_script("return document.body.clientWidth;")
                     driver.set_window_size(max(width, 1920), 1080)
-                    time.sleep(2)
+                    time.sleep(1)
                     height = driver.execute_script("""
                         var maxHeight = document.body.clientHeight;
                         var childrenNodes = document.body.children;
@@ -286,13 +293,13 @@ def get_contents_by_selenium(url: str = None,
                         return maxHeight;""")
                     # log(height)
                     driver.set_window_size(max(width, 1920), max(height, 1080))
-                    time.sleep(2)
+                    time.sleep(1)
                     driver.execute_script(f"window.scrollTo(0, {height})")
                     time.sleep(12)
                     driver.execute_script("window.scrollTo(0, 0)")
-                    time.sleep(2)
+                    time.sleep(1)
                     html_text = driver.page_source
-                    driver.save_screenshot(f'{download_dir}/image/{site_id}.png')
+                    driver.save_screenshot(f'{download_dir}/image/{site_id}_{getting_time}.png')
             except TimeoutException as ex:
                 log(f"[ERROR]\tTimeoutException: '{ex}'")
                 html_text = "<!DOCTYPE html><html lang='en'>" \
@@ -359,7 +366,7 @@ def data_to_base64(index, src, verbose: bool = True, referer_url: str = None):
 
     # html ファイルの場合 Selenium を利用して取得する．それ以外は，referer をつけて Requestsを利用する．
     if fmt == "text/html":
-        data, extra_data = get_contents_by_selenium(index, src)
+        data, extra_data = get_contents_by_selenium(index, src, referer_url=referer_url)
     else:
         # log(f"{index} , {sp} <- {src} as {fmt}")
         data, extra_data = get_contents(index, src, verbose=verbose, referer_url=referer_url)
@@ -428,6 +435,7 @@ def generate(url,
 
     global site_id
     global base_url
+    global getting_time
 
     if level <= 1:
         base_url = url
@@ -614,7 +622,7 @@ def generate(url,
     if level > 1:
         return soup.prettify(formatter='html5')
     else:
-        html_file_path = f"{download_dir}/html/{site_id}.html"
+        html_file_path = f"{download_dir}/html/{site_id}_{getting_time}.html"
         with open(html_file_path, 'w') as f:
             f.write(result)
 
@@ -626,6 +634,7 @@ def save_links():
     global external_links
     global internal_links
     global base_url
+    global getting_time
 
     links = [base_url]
     internal_links.sort()
@@ -636,7 +645,7 @@ def save_links():
         if url not in links:
             links.append(url)
 
-    link_file_path = f"{download_dir}/link/{site_id}.txt"
+    link_file_path = f"{download_dir}/link/{site_id}_{getting_time}.txt"
     with open(link_file_path, 'w') as f:
         f.write("\n".join(links))
 
@@ -644,48 +653,39 @@ def save_links():
 def save_url_id_list():
     global site_id
     global base_url
+    global getting_time
+
     link_file_path = f"{download_dir}/url_id_list.txt"
-    date = datetime.datetime.today().isoformat().split('.')[0].replace("T", " ")
-    text = f"{site_id}\t{base_url}\t{date}\n"
+    text = f"{site_id}\t{base_url}\t{getting_time}\n"
     with open(link_file_path, 'a') as f:
         f.write(text)
 
 
-#
-# def usage():
-#     print("""
-# usage:
-#
-#     $ poetry run webpage2html URL
-#
-# examples:
-#     $ poetry run webpage2html http://www.google.com
-#     $ poetry run webpage2html http://gabrielecirulli.github.io/2048/
-# """)
-#
-#
-# def main(kwargs):
-#     kwargs = {}
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('-q', '--quiet', action='store_true', help="don't show verbose url get log in stderr")
-#     parser.add_argument("url", help="the website to store")
-#     args = parser.parse_args()
-#
-#     args.verbose = not args.quiet
-#     args.keep_script = args.script
-#     args.verify = not args.insecure
-#     args.index = args.url
-#     kwargs = vars(args)
-#
-#     rs = generate(**kwargs)
-#     if args.output and args.output != '-':
-#         with open(args.output, 'wb') as f:
-#             f.write(rs.encode())
-#     else:
-#         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
-#         sys.stdout.write(rs)
+def check_within_one_day(url):
+    global download_dir
+    global site_id
+    site_id = make_site_id(url)
+    files = Path(download_dir).glob(f"**/{site_id}_*JST.*")
+    now = datetime.now(timezone(timedelta(hours=+9), 'JST'))
+    for file in files:
+        m = re.search(r'(\d{8}T\d{6}JST)\.(.+)$', str(file))
+        if m:
+            get_time = datetime.strptime(f"{m.group(1)}".replace("JST", '+0900'), '%Y%m%dT%H%M%S%z')
+            td = now - get_time
+            if td.days < 1:
+                return True
+            else:
+                continue
+    return False
 
 def short_cut(url):
+    global getting_time
+
+    # 24時間以内に取得していたらパスする．
+    if check_within_one_day(url):
+        print("24時間以内に取得したデータがあります．")
+        return False
+
     generate(url)
 
 
